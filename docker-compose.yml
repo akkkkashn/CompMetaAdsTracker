@@ -1,0 +1,19 @@
+services:
+  lxry-tracker:
+    build: ./backend
+    container_name: lxry-tracker
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - lxry-data:/app/data
+    environment:
+      - META_TOKEN=${META_TOKEN}
+      - META_COUNTRY=${META_COUNTRY:-SE}
+      - FRONTEND_PATH=/app/frontend
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  lxry-data:
