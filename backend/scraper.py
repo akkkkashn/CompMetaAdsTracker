@@ -9,7 +9,13 @@ from models import Ad
 META_API_URL = "https://graph.facebook.com/v19.0/ads_archive"
 META_TOKEN = os.environ.get("META_TOKEN", "")
 META_COUNTRY = os.environ.get("META_COUNTRY", "SE")
-BRANDS = ["Edblad", "Mockberg"]
+
+# Brand name -> Facebook Page ID
+BRANDS = {
+    "Edblad": "202938459747673",
+    "Mockberg": "1414744892080419",
+}
+
 ADS_PER_BRAND = 100
 
 FIELDS = [
@@ -82,39 +88,40 @@ def compute_run_days(start_str: str, end_str: str | None) -> int:
         return 0
 
 
-async def fetch_ads_for_brand(brand: str) -> list[dict]:
-    """Fetch up to ADS_PER_BRAND ads from Meta Ad Library for a given brand."""
+async def fetch_ads_for_brand(brand: str, page_id: str) -> list[dict]:
+    """Fetch up to ADS_PER_BRAND ads from Meta Ad Library for a given page ID."""
     ads_raw: list[dict] = []
     params = {
         "access_token": META_TOKEN,
-        "search_terms": brand,
+        "search_page_ids": page_id,
         "ad_reached_countries": META_COUNTRY,
-        "ad_type": "POLITICAL_AND_ISSUE_ADS",
+        "ad_type": "ALL",
         "fields": ",".join(FIELDS),
         "limit": 50,
     }
 
-    # Try POLITICAL_AND_ISSUE_ADS first, then ALL
-    for ad_type in ["POLITICAL_AND_ISSUE_ADS", "ALL"]:
-        params["ad_type"] = ad_type
-        url = META_API_URL
-        async with httpx.AsyncClient(timeout=30) as client:
-            while len(ads_raw) < ADS_PER_BRAND and url:
-                try:
-                    resp = await client.get(url, params=params if url == META_API_URL else None)
-                    data = resp.json()
-                    batch = data.get("data", [])
-                    if not batch:
-                        break
-                    ads_raw.extend(batch)
-                    paging = data.get("paging", {})
-                    url = paging.get("next")
-                    params = None  # next URL has params embedded
-                except Exception as e:
-                    print(f"[scraper] Error fetching {brand}: {e}")
+    url = META_API_URL
+    async with httpx.AsyncClient(timeout=30) as client:
+        while len(ads_raw) < ADS_PER_BRAND and url:
+            try:
+                resp = await client.get(url, params=params if url == META_API_URL else None)
+                data = resp.json()
+
+                if "error" in data:
+                    print(f"[scraper] API error for {brand}: {data['error'].get('message', data['error'])}")
                     break
-        if ads_raw:
-            break
+
+                batch = data.get("data", [])
+                if not batch:
+                    break
+                ads_raw.extend(batch)
+                print(f"[scraper] Fetched {len(ads_raw)} ads for {brand} so far...")
+                paging = data.get("paging", {})
+                url = paging.get("next")
+                params = None  # next URL has params embedded
+            except Exception as e:
+                print(f"[scraper] Error fetching {brand}: {e}")
+                break
 
     return ads_raw[:ADS_PER_BRAND]
 
@@ -163,8 +170,11 @@ async def pull_all_brands(session) -> dict:
     total_new = 0
     total_updated = 0
 
-    for brand in BRANDS:
-        raw_ads = await fetch_ads_for_brand(brand)
+    for brand, page_id in BRANDS.items():
+        print(f"[scraper] Pulling ads for {brand} (page_id={page_id})...")
+        raw_ads = await fetch_ads_for_brand(brand, page_id)
+        print(f"[scraper] Got {len(raw_ads)} ads for {brand}")
+
         for raw in raw_ads:
             ad_id = str(raw.get("id", ""))
             if not ad_id:
@@ -195,4 +205,4 @@ async def pull_all_brands(session) -> dict:
         ad.is_new = ad.first_seen >= cutoff
     session.commit()
 
-    return {"new": total_new, "updated": total_updated, "brands": BRANDS}
+    return {"new": total_new, "updated": total_updated, "brands": list(BRANDS.keys())}

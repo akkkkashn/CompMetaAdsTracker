@@ -129,7 +129,7 @@ async def toggle_save(ad_id: str):
 async def get_stats():
     with get_session() as session:
         stats = {}
-        for brand in BRANDS:
+        for brand in BRANDS.keys():
             brand_ads = session.exec(select(Ad).where(Ad.brand == brand)).all()
             active = [a for a in brand_ads if a.status == "Active"]
             run_days_list = [a.run_days for a in brand_ads if a.run_days > 0]
